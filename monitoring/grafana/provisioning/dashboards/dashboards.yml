@@ -1,0 +1,17 @@
+apiVersion: 1
+
+providers:
+  - name: techstream
+    orgId: 1
+    folder: TechStream
+    type: file
+    disableDeletion: false
+    # Reload the JSON from disk every 30s, so editing the committed file shows
+    # up without restarting Grafana.
+    updateIntervalSeconds: 30
+    # false means the dashboard is read only in the UI. Edits must go to the
+    # committed JSON, which keeps the repo the source of truth.
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

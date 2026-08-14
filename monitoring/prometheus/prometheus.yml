@@ -1,0 +1,55 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: techstream-lab
+
+# Alert rules live here. Step 5 adds HighErrorRate. An empty match is fine,
+# Prometheus starts normally when the glob finds nothing.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # The demo app. Metric names here are read directly by the dashboard and the
+  # alert rule, so this job does no relabelling.
+  - job_name: techstream-app
+    static_configs:
+      - targets:
+          - app:8080
+        labels:
+          app: techstream-web
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  - job_name: alertmanager
+    static_configs:
+      - targets:
+          - alertmanager:9093
+
+  # Host CPU and memory. node_cpu_seconds_total,
+  # node_memory_MemAvailable_bytes and node_memory_MemTotal_bytes are used
+  # as-is by the saturation panels, so do not relabel them away.
+  - job_name: node-exporter
+    static_configs:
+      - targets:
+          - node-exporter:9100
+
+  # Per-container CPU. container_cpu_usage_seconds_total and its "name" label
+  # are used as-is by the per-container saturation panel.
+  - job_name: cadvisor
+    # cAdvisor is the slowest target here, especially in the first minute after
+    # boot while it recovers container state. An explicit timeout below the
+    # scrape interval keeps a slow scrape from being recorded as a failure.
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+          - cadvisor:8080

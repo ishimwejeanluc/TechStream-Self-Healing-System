@@ -1,0 +1,18 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # Fixed uid so the committed dashboard JSON can reference it directly.
+    # Without this, Grafana assigns a random uid and every panel shows
+    # "datasource not found".
+    uid: techstream-prometheus
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Matches scrape_interval in prometheus.yml so Grafana suggests sensible
+      # step values and $__rate_interval resolves correctly.
+      timeInterval: 15s
+      httpMethod: POST

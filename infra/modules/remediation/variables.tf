@@ -24,7 +24,7 @@ variable "instance_arn" {
 }
 
 variable "app_dir" {
-  description = "Directory holding the repo on the instance. The document cds into app_dir/monitoring."
+  description = "Repo root on the instance. The restart document cds here, where docker-compose.yml lives."
   type        = string
   default     = "/opt/techstream"
 }

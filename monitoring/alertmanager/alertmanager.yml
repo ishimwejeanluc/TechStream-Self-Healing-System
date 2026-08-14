@@ -1,0 +1,46 @@
+# Routes HighErrorRate to the remediation Lambda Function URL.
+#
+# The url below is a placeholder that points at discard port 9, so Alertmanager
+# starts cleanly before the Lambda exists. Fill it in with:
+#
+#   make configure URL='https://<id>.lambda-url.eu-west-1.on.aws/?token=<token>'
+#
+# Step 5 covers this. Until then Alertmanager will log webhook failures, which
+# is the expected state.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: remediation-webhook
+  group_by: [alertname, app]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 30m
+
+  routes:
+    # group_wait is 0s so remediation starts as soon as the rule fires, rather
+    # than adding another 10s on top of the rule's own 1m "for" clause.
+    #
+    # repeat_interval is the real guard against restart storms. If the alert is
+    # still firing 10 minutes after a restart, the restart did not fix it and a
+    # second attempt is reasonable. The Lambda's in-memory throttle only helps
+    # while its execution environment stays warm, so this is what actually
+    # bounds how often the instance gets restarted.
+    - matchers:
+        - alertname="HighErrorRate"
+      receiver: remediation-webhook
+      group_wait: 0s
+      repeat_interval: 10m
+
+receivers:
+  - name: remediation-webhook
+    webhook_configs:
+      # Replaced by: make configure URL=...
+      - url: http://127.0.0.1:9/remediation-webhook-not-configured
+        # Sends the resolved notification too. The Lambda filters per alert on
+        # status == firing, so a resolved payload is a safe no-op that gives us
+        # a log line marking the end of the incident.
+        send_resolved: true
+
+inhibit_rules: []

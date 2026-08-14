@@ -1,0 +1,145 @@
+# TechStream self-healing lab. Composes the whole application system: the web
+# app plus the full monitoring and alerting stack.
+#
+# Lives at the repo root because it spans app/ and monitoring/, so neither
+# directory owns it. Run every compose command from the repo root.
+#
+# All image versions are pinned. No :latest anywhere, so a rebuild months from
+# now produces the same stack.
+#
+# The SSM remediation document runs:
+#   cd /opt/techstream && docker compose restart app
+# so the service below must stay named "app".
+
+name: techstream
+
+services:
+  app:
+    build:
+      context: ./app
+    image: techstream-app:1.0.0
+    container_name: techstream-app
+    restart: unless-stopped
+    environment:
+      APP_NAME: ${APP_NAME:-techstream-web}
+      BASE_LATENCY_MS: ${BASE_LATENCY_MS:-25}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # /healthz is never subject to injected errors, so an unhealthy container
+      # means a genuine problem rather than active chaos.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: techstream-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      # Lets the alert rules be reloaded with a POST to /-/reload instead of a
+      # restart.
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: techstream-alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "9093:9093"
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: techstream-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      # Fails to start with a clear message if this is not set in .env.
+      # Better than silently defaulting to admin/admin on a public port.
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?set GF_SECURITY_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      # Datasource and dashboard provider definitions
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      # The dashboard JSON itself, loaded by the provider above
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  # Host CPU and memory. Provides node_cpu_seconds_total,
+  # node_memory_MemAvailable_bytes and node_memory_MemTotal_bytes.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: techstream-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    pid: host
+    # Not published to the host. Prometheus reaches it over the compose network,
+    # so there is no reason to widen the attack surface or the security group.
+    expose:
+      - "9100"
+
+  # Per-container CPU. Provides container_cpu_usage_seconds_total with the
+  # "name" label the saturation panel groups by.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: techstream-cadvisor
+    restart: unless-stopped
+    command:
+      # Only watch Docker containers, not every cgroup on the host.
+      - --docker_only=true
+      - --housekeeping_interval=10s
+      # Disk collectors are switched off deliberately. They walk the overlay2
+      # directories to compute usage, which took 2 to 3 seconds per container on
+      # this host and made the first few scrapes exceed the timeout, so the
+      # target flapped down on every boot. The dashboard only needs
+      # container_cpu_usage_seconds_total, so none of this is a loss.
+      - --disable_metrics=advtcp,cpu_topology,cpuset,disk,diskIO,hugetlb,memory_numa,percpu,process,referenced_memory,resctrl,sched,tcp,udp
+    # cAdvisor needs to read cgroups and the Docker state directory.
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    expose:
+      - "8080"
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
