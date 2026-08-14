@@ -1,0 +1,32 @@
+# cp terraform.tfvars.example terraform.tfvars and edit.
+# terraform.tfvars is gitignored because it holds the webhook token.
+
+region  = "eu-west-1"
+project = "techstream"
+
+# Your IP only. Find it with: curl -s https://checkip.amazonaws.com
+# 0.0.0.0/0 is rejected by a variable validation.
+allowed_cidr = "41.186.176.42/32"
+
+instance_type    = "t3.medium"
+root_volume_size = 30
+
+# Existing EC2 key pair name for SSH from Termius.
+# Leave commented out to rely on SSM Session Manager instead.
+# key_name = "my-keypair"
+
+# Shared secret Alertmanager appends as ?token= on the Function URL.
+# Generate one with: openssl rand -hex 32
+remediation_webhook_token = "replace-with-openssl-rand-hex-32"
+
+log_retention_days = 14
+
+# Alternative remediation path. Restart is the default and is what this lab
+# demonstrates. See the runbook for the tradeoff.
+enable_scale_out    = false
+asg_name            = ""
+scale_out_increment = 1
+
+# Audit only, off the critical path.
+enable_eventbridge_audit = false
+event_bus_name           = "default"

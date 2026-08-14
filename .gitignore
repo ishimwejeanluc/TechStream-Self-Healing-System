@@ -1,0 +1,33 @@
+# Secrets and per-environment values
+.env
+*.tfvars
+!*.tfvars.example
+*.auto.tfvars
+
+# Terraform state. bootstrap/ keeps LOCAL state, so it must never be committed.
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
+crash.*.log
+tfplan
+tfplan.*
+*.tfplan
+
+# Lambda zip Terraform builds from infra/modules/remediation/lambda
+infra/modules/*/build/
+*.zip
+
+# Runtime output from the lab
+chaos/incident.json
+rca/rca_report.json
+rca/rca_report.md
+monitoring/data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store

@@ -1,0 +1,13 @@
+# cp terraform.tfvars.example terraform.tfvars and edit.
+# terraform.tfvars is gitignored.
+
+region  = "eu-west-1"
+project = "techstream"
+
+# Set true only if you are on Terraform older than 1.10 and need a
+# DynamoDB lock table instead of S3-native locking.
+create_dynamodb_lock_table = false
+
+# Optional customer managed KMS key for state encryption.
+# Leave commented out to use SSE-S3.
+# kms_key_arn = "arn:aws:kms:eu-west-1:111122223333:key/abcd1234-..."
