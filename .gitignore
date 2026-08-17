@@ -4,6 +4,11 @@
 !*.tfvars.example
 *.auto.tfvars
 
+# Holds the remediation webhook URL including its shared token. Alertmanager
+# reads it at notify time via url_file, so the token never enters a committed
+# config. Written by: make configure URL=...
+monitoring/alertmanager/webhook_url
+
 # Terraform state. bootstrap/ keeps LOCAL state, so it must never be committed.
 *.tfstate
 *.tfstate.*
@@ -18,11 +23,14 @@ tfplan.*
 infra/modules/*/build/
 *.zip
 
-# Runtime output from the lab
-chaos/incident.json
-rca/rca_report.json
-rca/rca_report.md
+# Runtime output from the lab.
+#
+# chaos/incident.json and the rca reports are deliberately NOT ignored. A sample
+# incident window and the RCA report it produced are deliverables, and they are
+# the evidence behind the timestamps in the runbook. They get overwritten on the
+# next run, which is expected.
 monitoring/data/
+chaos/incident.json.tmp.*
 
 # Python
 __pycache__/

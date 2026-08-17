@@ -1,18 +1,23 @@
-# Routes HighErrorRate to the remediation Lambda Function URL.
+# Routes HighErrorRate to the remediation webhook, and nothing else.
 #
-# The url below is a placeholder that points at discard port 9, so Alertmanager
-# starts cleanly before the Lambda exists. Fill it in with:
+# The webhook URL carries a shared token, so it is NOT in this committed file.
+# It is read at notify time from /etc/alertmanager/webhook_url, which is
+# gitignored. Write it with:
 #
 #   make configure URL='https://<id>.lambda-url.eu-west-1.on.aws/?token=<token>'
 #
-# Step 5 covers this. Until then Alertmanager will log webhook failures, which
-# is the expected state.
+# Alertmanager validates this config even when that file does not exist yet, so
+# the stack starts fine before remediation is configured. Until then a firing
+# alert logs a notify error, which is the expected state.
 
 global:
   resolve_timeout: 5m
 
 route:
-  receiver: remediation-webhook
+  # Default is the null receiver, so remediation is fail closed. A new alert has
+  # to be routed to the webhook deliberately, rather than inheriting it by
+  # accident and restarting the app for something a restart cannot fix.
+  receiver: null-receiver
   group_by: [alertname, app]
   group_wait: 10s
   group_interval: 1m
@@ -24,7 +29,7 @@ route:
     #
     # repeat_interval is the real guard against restart storms. If the alert is
     # still firing 10 minutes after a restart, the restart did not fix it and a
-    # second attempt is reasonable. The Lambda's in-memory throttle only helps
+    # second attempt is reasonable. The Lambda's in-memory throttle only holds
     # while its execution environment stays warm, so this is what actually
     # bounds how often the instance gets restarted.
     - matchers:
@@ -34,13 +39,24 @@ route:
       repeat_interval: 10m
 
 receivers:
+  # HighLatencyP95 and HostCpuSaturation land here. They are observation only,
+  # because restarting the app does nothing for a saturated host.
+  - name: null-receiver
+
   - name: remediation-webhook
     webhook_configs:
-      # Replaced by: make configure URL=...
-      - url: http://127.0.0.1:9/remediation-webhook-not-configured
+      - url_file: /etc/alertmanager/webhook_url
         # Sends the resolved notification too. The Lambda filters per alert on
-        # status == firing, so a resolved payload is a safe no-op that gives us
-        # a log line marking the end of the incident.
+        # status == firing, so a resolved payload is a safe no-op that gives a
+        # log line marking the end of the incident.
         send_resolved: true
+        max_alerts: 0
 
-inhibit_rules: []
+inhibit_rules:
+  # While the error rate is critical, do not also page about latency. A failing
+  # app is usually a slow app, and the error alert is the actionable one.
+  - source_matchers:
+      - alertname="HighErrorRate"
+    target_matchers:
+      - alertname="HighLatencyP95"
+    equal: [app]

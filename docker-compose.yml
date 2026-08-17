@@ -139,6 +139,35 @@ services:
     expose:
       - "8080"
 
+  # Local stand-in for the remediation Lambda, so the self-healing loop can be
+  # proven without AWS. Same webhook contract and same decision logic, but it
+  # restarts through the Docker API instead of SSM.
+  #
+  # Behind a profile, so it does NOT start with a plain "docker compose up -d":
+  #   docker compose --profile local-remediation up -d
+  #
+  # It mounts the Docker socket, which is root equivalent on the host. That is
+  # acceptable for local verification and unacceptable on the instance, which is
+  # why the deployed path uses Lambda plus SSM with a scoped IAM policy instead.
+  # Never enable this profile on EC2.
+  remediator:
+    build:
+      context: ./remediator
+    image: techstream-remediator-local:1.0.0
+    container_name: techstream-remediator
+    profiles:
+      - local-remediation
+    restart: unless-stopped
+    environment:
+      WEBHOOK_TOKEN: ${REMEDIATION_WEBHOOK_TOKEN:?set REMEDIATION_WEBHOOK_TOKEN in .env}
+      TARGET_CONTAINER: techstream-app
+      EXPECTED_ALERTNAME: HighErrorRate
+      MIN_SECONDS_BETWEEN_ACTIONS: ${MIN_SECONDS_BETWEEN_ACTIONS:-120}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "8000"
+
 volumes:
   prometheus-data:
   alertmanager-data:
