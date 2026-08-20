@@ -17,7 +17,7 @@ and the API script are alternatives further down.
 | Step | State |
 |---|---|
 | 1. Ship metrics with remote_write | Done, waiting on a real token |
-| 2. ML jobs as Terraform in `infra/grafana-ml/` | Not started |
+| 2. ML jobs as Terraform in `infra/grafana-ml/` | Written and validated, not applied |
 | 3. Remediation loop unchanged | Unchanged by design |
 | 4. Sift investigation as the RCA artifact | Not started |
 
@@ -139,6 +139,135 @@ alert rules still evaluating. A broken remote_write does not break the lab.
 
 Once the real token is in place, that error stops and Active Series in the Cloud
 Portal climbs off 0.
+
+## Step 2: the ML jobs as Terraform
+
+Directory `infra/grafana-ml/`. Separate state from `infra/stack`, same bucket.
+
+### Why separate state
+
+Different provider, different credentials, different lifecycle. `infra/stack`
+uses the aws provider and AWS credentials; this uses the grafana provider and a
+Grafana token. ML jobs get retuned often, the EC2 instance does not. Keeping them
+apart means a `terraform destroy` here cannot touch the instance, and an AWS
+apply cannot lock this state.
+
+```hcl
+backend "s3" {
+  bucket       = "techstream-tfstate-515966510180-eu-west-1"   # same bucket
+  key          = "techstream/grafana-ml.tfstate"               # different key
+  region       = "eu-west-1"
+  encrypt      = true
+  use_lockfile = true
+}
+```
+
+Same locking method as the rest of the project. Terraform here is 1.14.8, so
+S3-native locking, no DynamoDB table.
+
+If this config ever needs a value from the AWS stack, read it with a
+`terraform_remote_state` data source pointing at `techstream/terraform.tfstate`.
+Do not merge the states. Nothing needs it today.
+
+### What it creates
+
+| Resource | Purpose |
+|---|---|
+| `grafana_machine_learning_job.error_ratio` | Forecast on the error ratio |
+| `grafana_machine_learning_outlier_detector.container_cpu` | DBSCAN across per-container CPU |
+| `grafana_machine_learning_alert` x2 | Insight alerts, behind `enable_ml_alerts` |
+
+The datasource UID is resolved by name with a `data "grafana_data_source"` lookup
+rather than pasted in, so recreating the stack does not break the config.
+
+Provider pinned `~> 4.0`, resolved to **4.45.1**. The brief suggested `>= 3.0`,
+but 4.x is current and the ML resource schemas are stable there.
+
+### The one query that is not verbatim
+
+The forecast job appends `or vector(0)` to the shared error ratio expression.
+Everything else, including the container CPU query, is byte for byte identical to
+the dashboard and the alert rule.
+
+The reason is in the gotchas below. Short version: the shared expression returns
+empty rather than zero on a healthy app, and a model cannot train on a series
+that does not exist.
+
+### Guards on the inputs
+
+Both are enforced at plan time, before any API call:
+
+```
+grafana_auth = "glc_..."          -> Error: Invalid value for variable
+grafana_url  = "http://insecure"  -> grafana_url must start with https://
+```
+
+The first one matters, because the two token types look similar and the failure
+otherwise appears much later as a confusing permissions error.
+
+### Running it
+
+```bash
+cd infra/grafana-ml
+cp terraform.tfvars.example terraform.tfvars    # add the glsa_ token
+make ml-plan
+make ml-apply
+make ml-output
+```
+
+**This needs the bootstrap bucket to exist.** `infra/bootstrap` has not been
+applied, so `terraform init` against that backend will fail until it is:
+
+```bash
+make tf-bootstrap        # one time, creates the state bucket
+```
+
+If you want to try the ML jobs before creating any AWS resources, drop a
+`backend_override.tf` containing `backend "local" {}` into
+`infra/grafana-ml/`, work with local state, then `terraform init -migrate-state`
+once the bucket exists.
+
+### Verification status
+
+| Check | Result |
+|---|---|
+| `terraform fmt` | clean across `infra/` |
+| `terraform validate` | Success |
+| Provider resolved | grafana 4.45.1 |
+| `glc_` token rejected | yes, at plan time |
+| `http://` URL rejected | yes, at plan time |
+| Applied | **no**, needs the bootstrap bucket and a `glsa_` token |
+
+Schemas were confirmed against the provider docs rather than assumed, because
+these resources change shape between versions. `machine_learning_job` takes
+`name`, `metric`, `datasource_type`, `datasource_uid`, `query_params`, and
+optional `hyper_params`, `custom_labels`, `holidays`.
+`machine_learning_outlier_detector` additionally requires `interval` and an
+`algorithm` block with a nested `config { epsilon }` for DBSCAN.
+`machine_learning_alert` takes either `job_id` or `outlier_id`.
+
+### No hyper_params, on purpose
+
+`daily_seasonality` and `weekly_seasonality` only mean something with days or
+weeks of history. A stack that has been collecting for minutes has neither, so
+provider defaults are used. Add them once there is a week of data.
+
+## Step 3: the remediation loop is unchanged
+
+Nothing in `monitoring/prometheus/rules/alerts.yml`,
+`monitoring/alertmanager/alertmanager.yml`, the Lambda or the remediator was
+touched. The Prometheus `HighErrorRate` rule remains the only thing that triggers
+a restart.
+
+The ML alerts carry `remediation = "none"` and are routed nowhere. A mistrained
+model cannot restart the app. That matters: a model that has learned the wrong
+baseline would otherwise be able to restart production repeatedly.
+
+To let an ML signal drive remediation later, add a webhook contact point in
+Grafana Alerting pointing at the same Lambda Function URL with the same
+`?token=`, and route the ML alert to it. The Lambda filters on
+`alertname == HighErrorRate`, so either rename the ML alert to match or widen
+`EXPECTED_ALERTNAME`. Do not do this by default.
 
 ## Gotchas that will bite you
 

@@ -1,0 +1,24 @@
+# cp terraform.tfvars.example terraform.tfvars and edit.
+# terraform.tfvars is gitignored by the existing *.tfvars rule.
+
+grafana_url = "https://largedingo3143.grafana.net"
+
+# Service account token from INSIDE Grafana:
+#   Administration > Users and access > Service accounts > Add service account
+#   role Admin, then Add service account token
+# Starts with glsa_. A glc_ token is a Cloud Portal token and will not work.
+grafana_auth = "glsa_REPLACE_ME"
+
+# Grafana Cloud names this automatically as grafanacloud-<stack>-prom.
+# Check under Connections > Data sources if unsure.
+prometheus_datasource_name = "grafanacloud-largedingo3143-prom"
+
+# ML alerts are insight only and never trigger remediation.
+enable_ml_alerts  = true
+anomaly_threshold = ">0.8"
+anomaly_window    = "15m"
+
+# DBSCAN tuning. Raise sensitivity to flag more points as outliers.
+outlier_interval_seconds = 300
+dbscan_sensitivity       = 0.5
+dbscan_epsilon           = 1.0

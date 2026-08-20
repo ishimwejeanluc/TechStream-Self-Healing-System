@@ -115,7 +115,6 @@ ifndef TOKEN
 	@exit 2
 endif
 	@printf '%s' '$(TOKEN)' > monitoring/prometheus/grafana_cloud_token
-	@chmod 600 monitoring/prometheus/grafana_cloud_token
 	@echo "wrote monitoring/prometheus/grafana_cloud_token (gitignored)"
 	@curl -sf -X POST $(PROM_URL)/-/reload >/dev/null 2>&1 \
 		&& echo "prometheus reloaded" \
@@ -226,8 +225,46 @@ tf-apply: ## Apply the main stack
 tf-output: ## Show stack outputs, including the Lambda Function URL
 	terraform -chdir=infra/stack output
 
+# ------------------------------------------------------------- grafana ml
+
+.PHONY: ml-init
+ml-init: ## Init the Grafana ML state (needs the bootstrap bucket to exist)
+	terraform -chdir=infra/grafana-ml init
+
+.PHONY: ml-plan
+ml-plan: ## Plan the Grafana Cloud ML jobs
+	terraform -chdir=infra/grafana-ml init
+	terraform -chdir=infra/grafana-ml plan
+
+.PHONY: ml-apply
+ml-apply: ## Create the ML jobs and outlier detector in Grafana Cloud
+	terraform -chdir=infra/grafana-ml init
+	terraform -chdir=infra/grafana-ml apply
+
+.PHONY: ml-output
+ml-output: ## Show ML job IDs and next steps
+	terraform -chdir=infra/grafana-ml output
+
+.PHONY: ml-destroy
+ml-destroy: ## Destroy ONLY the ML jobs. Independent of the AWS stack.
+	terraform -chdir=infra/grafana-ml destroy
+	@echo
+	@echo "The AWS stack is untouched. Remember to delete the"
+	@echo "terraform-techstream-ml service account in Grafana to revoke its token."
+
+.PHONY: ml-baseline
+ml-baseline: ## Run the baseline traffic the models must train on BEFORE any chaos
+	@echo "Models learn normal from this. If chaos runs during the training"
+	@echo "window, the model learns that failing is normal and will not flag it."
+	@$(MAKE) --no-print-directory traffic DURATION=600 RPS=20
+	@echo
+	@echo "Now check the jobs are trained and healthy before injecting a fault."
+
 .PHONY: tf-destroy
 tf-destroy: ## Destroy the main stack. Bootstrap is destroyed separately and last.
+	@echo "Note: infra/grafana-ml has its own state and is destroyed separately."
+	@echo "      Run 'make ml-destroy' for that. Order between them does not matter."
+	@echo
 	terraform -chdir=infra/stack destroy
 	@echo
 	@echo "The state bucket in infra/bootstrap still exists, and holds this state."
