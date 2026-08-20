@@ -35,14 +35,46 @@ groups:
           ratio: '{{ $value | printf "%.2f" }}'
           runbook: docs/RUNBOOK.md
 
+      # Closes a real gap in HighErrorRate.
+      #
+      # The error ratio expression returns empty, not zero, when the 5xx series
+      # does not exist. That happens after a successful restart, which is
+      # harmless. It also happens when the app is completely dead and serving no
+      # requests at all, which is not harmless: HighErrorRate would sit
+      # inactive and the outage would page nobody.
+      #
+      # Observation only, deliberately. An app that is down mid-restart would
+      # otherwise trigger another restart, and a restart loop is worse than the
+      # original fault. for: 2m is longer than any normal restart takes, so this
+      # only fires on a genuine outage that needs a human.
+      - alert: AppDown
+        expr: up{job="techstream-app"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          app: techstream-web
+          remediation: none
+        annotations:
+          summary: "techstream-web is not being scraped"
+          description: >-
+            Prometheus cannot scrape the app. HighErrorRate cannot detect this,
+            because with no requests at all the error ratio expression returns
+            no data rather than 100 percent. Needs a human.
+
       # Observation only. Deliberately NOT routed to remediation, because a
       # restart does nothing for genuine latency or CPU saturation. These exist
       # to give the RCA corroborating signals, and to prove the routing tree
       # only sends HighErrorRate to the Lambda.
+      # Threshold calibrated from measurement, not picked round.
+      #   idle baseline p95            about 0.07s
+      #   p95 with cores saturated     about 0.25s at 30 req/s
+      # 0.2s is roughly 3x baseline, which is a real regression worth knowing
+      # about. An earlier 0.5s threshold was 7x baseline: the app could get three
+      # and a half times slower than normal and nothing would say so.
       - alert: HighLatencyP95
         expr: >-
           histogram_quantile(0.95,
-            sum(rate(http_request_duration_seconds_bucket[1m])) by (le)) > 0.5
+            sum(rate(http_request_duration_seconds_bucket[1m])) by (le)) > 0.2
         for: 2m
         labels:
           severity: warning

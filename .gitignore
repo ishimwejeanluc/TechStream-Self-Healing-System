@@ -8,6 +8,10 @@
 # reads it at notify time via url_file, so the token never enters a committed
 # config. Written by: make configure URL=...
 monitoring/alertmanager/webhook_url
+# Grafana Cloud remote_write credential. Prometheus does not expand environment
+# variables in prometheus.yml, so basic_auth reads it from this file instead.
+# Written by: make cloud-token TOKEN=glc_...
+monitoring/prometheus/grafana_cloud_token
 
 # Terraform state. bootstrap/ keeps LOCAL state, so it must never be committed.
 *.tfstate

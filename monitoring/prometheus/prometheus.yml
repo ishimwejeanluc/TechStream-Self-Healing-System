@@ -4,6 +4,46 @@ global:
   external_labels:
     monitor: techstream-lab
 
+# Ship a copy of these metrics to Grafana Cloud so its Machine Learning jobs and
+# Sift investigations can read them. Local scraping and local alerting are
+# untouched by this: remote_write is an additional fan-out, not a replacement.
+# If Grafana Cloud is unreachable, Prometheus keeps scraping and the self-healing
+# loop keeps working. The samples queue and drain when it returns.
+#
+# The token is NOT in this file. Prometheus does not expand environment
+# variables in its config, so basic_auth uses password_file, the same pattern
+# Alertmanager already uses for its webhook URL. Write the token with:
+#   make cloud-token TOKEN=glc_...
+remote_write:
+  - url: https://prometheus-prod-67-prod-us-west-0.grafana.net/api/prom/push
+    name: grafana-cloud
+
+    basic_auth:
+      # Numeric instance ID, not a name. Safe to commit, it is not a secret.
+      username: "3508250"
+      password_file: /etc/prometheus/grafana_cloud_token
+
+    # Allowlist, not everything. This stack carries about 3000 active series and
+    # the Grafana Cloud free tier allows 10000, but roughly 2500 of those are
+    # node-exporter internals, Prometheus self-monitoring and Alertmanager
+    # internals that no dashboard panel, alert rule or ML job queries. Shipping
+    # them would burn the allowance and slow training for nothing.
+    #
+    # Everything kept below is used by a panel, a rule, or an ML job. If you add
+    # a panel needing a new metric, add it here too, or it will work locally and
+    # be missing in Grafana Cloud.
+    #
+    # One rule, not two, and no negative lookahead. Prometheus relabelling uses
+    # Go's RE2 engine, which does not support lookahead at all, so "container CPU
+    # but only ours" has to be expressed as a positive alternation. The matched
+    # value is "__name__;name" joined by the default separator, and Prometheus
+    # anchors the regex at both ends.
+    write_relabel_configs:
+      - source_labels: [__name__, name]
+        action: keep
+        regex: >-
+          (http_requests_total|http_request_duration_seconds_(bucket|count|sum)|node_cpu_seconds_total|node_memory_Mem(Available|Total)_bytes|chaos_(error_rate|cpu_runs_active|cpu_cores_requested)|app_start_time_seconds|up);.*|container_cpu_usage_seconds_total;techstream-.*
+
 # Alert rules live here. Step 5 adds HighErrorRate. An empty match is fine,
 # Prometheus starts normally when the glob finds nothing.
 rule_files:

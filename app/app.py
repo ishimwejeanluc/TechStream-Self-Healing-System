@@ -31,8 +31,20 @@ from prometheus_client import (
 
 APP_NAME = os.getenv("APP_NAME", "techstream-web")
 PORT = int(os.getenv("PORT", "8080"))
-BASE_LATENCY_MS = float(os.getenv("BASE_LATENCY_MS", "25"))
-CPU_WORK_ITERATIONS = int(os.getenv("CPU_WORK_ITERATIONS", "1500"))
+# Latency is split between real CPU work and a sleep. The CPU part has to
+# dominate enough that saturating the cores actually slows requests down,
+# otherwise CPU chaos produces no latency effect and the RCA can never observe
+# CPU leading latency.
+#
+# Measured in this image: 25000 iterations is about 10ms of CPU. Combined with a
+# 15ms sleep that gives a baseline p50 near 25ms, and under CPU contention the
+# 10ms stretches while the sleep does not.
+#
+# An earlier version used 1500 iterations, which measured 0.7ms. That was far
+# too little: at 4x core oversubscription p95 latency only reached 0.185s,
+# because a sleep takes its wall clock time regardless of CPU pressure.
+BASE_LATENCY_MS = float(os.getenv("BASE_LATENCY_MS", "15"))
+CPU_WORK_ITERATIONS = int(os.getenv("CPU_WORK_ITERATIONS", "25000"))
 MAX_CPU_SECONDS = int(os.getenv("MAX_CPU_SECONDS", "600"))
 MAX_CPU_WORKERS = int(os.getenv("MAX_CPU_WORKERS", "8"))
 
@@ -144,10 +156,15 @@ def _unhandled(exc: Exception):
 def _do_work() -> None:
     """Simulate a request that does some real work.
 
-    Two parts on purpose. The sleep gives a stable lognormal latency spread so
-    the percentile panels look sensible. The busy loop consumes actual CPU, so
-    when stress-ng saturates the cores this request genuinely slows down. That
-    causal link is what the RCA in Step 6 detects.
+    Two parts on purpose. The busy loop consumes real CPU, so when stress-ng
+    saturates the cores this request genuinely slows down. That causal link is
+    what makes the RCA in Step 6 able to observe CPU rising before latency. The
+    sleep adds a lognormal spread so p50, p95 and p99 stay distinguishable
+    instead of collapsing onto one line.
+
+    The CPU part has to be the larger of the two. A sleep-dominated request
+    barely responds to CPU pressure, which breaks the causal chain the whole lab
+    is built to demonstrate.
     """
     total = 0
     for i in range(CPU_WORK_ITERATIONS):

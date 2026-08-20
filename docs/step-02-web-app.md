@@ -104,23 +104,54 @@ are testing.
 ```python
 def _do_work() -> None:
     total = 0
-    for i in range(CPU_WORK_ITERATIONS):
+    for i in range(CPU_WORK_ITERATIONS):   # about 10ms of CPU
         total += i * i
 
     seconds = (BASE_LATENCY_MS / 1000.0) * random.lognormvariate(0.0, 0.45)
-    time.sleep(min(seconds, 2.0))
+    time.sleep(min(seconds, 2.0))          # about 15ms, adds spread
 ```
 
-Two parts, each with a purpose. The sleep gives a stable lognormal latency
-spread so the percentile panels look like a real service. The busy loop burns
-actual CPU, so when stress-ng saturates the cores, requests genuinely slow down.
+Two parts, each with a purpose. The busy loop burns real CPU, so when stress-ng
+saturates the cores requests genuinely slow down. The sleep adds a lognormal
+spread so p50, p95 and p99 stay distinguishable instead of collapsing onto one
+line.
 
-That second part matters for Step 6. If latency were pure sleep, CPU saturation
-would not affect it, and the RCA could never observe CPU rising before latency.
-The causal chain it reports has to actually exist.
+The CPU part has to be the larger of the two. If latency were sleep dominated,
+CPU saturation would barely affect it, and the RCA in Step 6 could never observe
+CPU leading latency. The causal chain it reports has to actually exist.
 
-Measured: 27ms idle, 58ms with 2 cores saturated. Roughly 2.2x, which is enough
-for threshold detection to see it.
+### This was originally sized wrong
+
+The first version used `CPU_WORK_ITERATIONS = 1500` with a 25ms sleep, and this
+document claimed a measured 27ms idle versus 58ms under load. That 2.2x was real
+but far weaker than it needed to be, and the reason only became clear in Step 6.
+
+Benchmarked in the actual image:
+
+```
+   1500 iterations ->   0.70 ms of CPU
+  25000 iterations ->  10.3  ms of CPU
+```
+
+1500 iterations was **0.7ms**. The request was almost entirely `sleep`, and a
+sleep takes its wall clock time no matter how contended the CPU is. Pushed to
+four times core oversubscription, 16 stress workers on 4 cores at 589 percent
+container CPU, p95 latency still only reached 0.185s. CPU saturation was
+producing essentially no latency signal.
+
+Now `CPU_WORK_ITERATIONS = 25000` (about 10ms of CPU) with `BASE_LATENCY_MS = 15`,
+so baseline latency stays in the same range while the CPU-bound share dominates.
+
+Measured after the change:
+
+| Condition | p50 | p95 |
+|---|---|---|
+| Idle | about 0.03s | about 0.07s |
+| Cores saturated, 30 req/s | 0.099s | 0.248s |
+| Cores saturated, sustained | - | up to 0.939s |
+
+p95 now moves by more than 3x under CPU pressure, which is enough for the RCA to
+see CPU and latency as a connected pair rather than two unrelated signals.
 
 ## Why gunicorn runs a single worker
 

@@ -5,33 +5,33 @@
   "parameters": {
     "error_rate": 0.4,
     "cpus": null,
-    "requested_rps": 12,
-    "injection_seconds": 60,
-    "recovery_seconds": 60,
+    "requested_rps": 20,
+    "injection_seconds": 120,
+    "recovery_seconds": 240,
     "reset_on_exit": false
   },
-  "started_at": "2026-08-14T15:50:39Z",
-  "started_epoch": 1786722639,
-  "injection_ended_at": "2026-08-14T15:51:39Z",
-  "injection_ended_epoch": 1786722699,
-  "ended_at": "2026-08-14T15:52:39Z",
-  "ended_epoch": 1786722759,
-  "duration_seconds": 120,
+  "started_at": "2026-08-17T13:30:12Z",
+  "started_epoch": 1786973412,
+  "injection_ended_at": "2026-08-17T13:32:12Z",
+  "injection_ended_epoch": 1786973532,
+  "ended_at": "2026-08-17T13:36:12Z",
+  "ended_epoch": 1786973772,
+  "duration_seconds": 360,
   "windows": {
-    "baseline": { "start_epoch": 1786722339, "end_epoch": 1786722639 },
-    "injection": { "start_epoch": 1786722639, "end_epoch": 1786722699 },
-    "recovery": { "start_epoch": 1786722699, "end_epoch": 1786722759 },
-    "query": { "start_epoch": 1786722339, "end_epoch": 1786722819 }
+    "baseline": { "start_epoch": 1786973112, "end_epoch": 1786973412 },
+    "injection": { "start_epoch": 1786973412, "end_epoch": 1786973532 },
+    "recovery": { "start_epoch": 1786973532, "end_epoch": 1786973772 },
+    "query": { "start_epoch": 1786973112, "end_epoch": 1786973832 }
   },
   "requests": {
-    "sent": 1344,
-    "http_2xx": 774,
-    "http_5xx": 570,
-    "observed_rps": 11
+    "sent": 6960,
+    "http_2xx": 6089,
+    "http_5xx": 771,
+    "observed_rps": 19
   },
-  "app_start_time_seconds_first": 1.7867221724818606e+09,
-  "app_start_time_seconds_last": 1.7867221724818606e+09,
-  "distinct_app_processes_seen": 1,
-  "app_restart_count": 0,
-  "app_restarted_during_run": false
+  "app_start_time_seconds_first": 1.786972672807714e+09,
+  "app_start_time_seconds_last": 1.78697351422624e+09,
+  "distinct_app_processes_seen": 2,
+  "app_restart_count": 1,
+  "app_restarted_during_run": true
 }
