@@ -271,6 +271,79 @@ Grafana Alerting pointing at the same Lambda Function URL with the same
 
 ## Gotchas that will bite you
 
+### Prophet needs at least 100 datapoints, continuously
+
+This is the rule that governs everything and it is not obvious from the UI, which
+shows only a red "Failed to run". The real message comes from the API:
+
+```
+"error": "No series to train",
+"warnings": ["Ignoring series with less than 100 datapoints: {}"]
+```
+
+So the arithmetic is:
+
+| `interval` | Continuous data needed for 100 points |
+|---|---|
+| 15s | 25 minutes |
+| 60s (this repo) | 100 minutes |
+| 300s (provider default) | 8 hours 20 minutes |
+
+The provider default of 300 is the reason a fresh lab appears broken for most of a
+day. This repo sets `interval = 60`.
+
+**Continuous is the operative word.** A datapoint only exists where the query
+returns a value. Bursts of traffic separated by silence produce gaps, and gaps do
+not count. Two consequences:
+
+- `http_requests_total` does not exist at all until the app serves its first
+  request, because `prometheus_client` only emits a labelled counter once it has
+  been incremented. No traffic means no series, not a series of zeros.
+- Traffic and latency forecasts therefore need traffic running the whole time.
+
+That is what the `loadgen` service is for:
+
+```bash
+make baseline-up      # continuous 5 req/s, leave it running
+```
+
+Without it, every forecast on an app metric will keep failing the 100 point rule
+no matter how long the stack has been up.
+
+### A flat series cannot be forecast either
+
+Separate failure, same error message. A perfectly healthy app holds the error
+ratio at exactly 0, and Prophet rejects a straight line:
+
+```
+"warnings": ["Ignoring series with only a single value: {}"]
+```
+
+Two fixes, both applied:
+
+- `label_replace(...)` gives the series a stable label set. `vector(0)` alone
+  produces an anonymous `{}` series.
+- `loadgen` injects a small baseline error rate, 1.5 percent by default, which is
+  what a real service looks like and is well under the 5 percent alert threshold
+  so it never triggers remediation.
+
+### Retraining is daily, and not settable in Terraform
+
+The provider exposes `interval` and `training_window` but **not**
+`training_frequency`. Jobs retrain once every 86400 seconds. Confirmed against
+the provider schema.
+
+So after fixing data problems you must force it:
+
+```bash
+make ml-retrain       # recreates the jobs, which triggers immediate training
+make ml-status        # status plus the real error, not just a red badge
+```
+
+`make ml-status` is worth using instead of the UI. A job showing
+`initial training` is still in progress, not successful, and the UI does not make
+that distinction obvious.
+
 ### Models need a training window before any chaos test
 
 This is the important one. An anomaly or forecast model learns what normal looks

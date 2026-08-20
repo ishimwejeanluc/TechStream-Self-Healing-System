@@ -15,9 +15,12 @@ module "compute" {
   instance_type      = var.instance_type
   subnet_id          = local.subnet_id
   security_group_ids = [module.network.security_group_id]
-  key_name           = var.key_name
-  root_volume_size   = var.root_volume_size
-  app_dir            = local.app_dir
+  # Prefer the generated key pair. Falls back to var.key_name when
+  # create_key_pair is false, and to null when neither is set, in which case
+  # access is via SSM Session Manager only.
+  key_name         = var.create_key_pair ? aws_key_pair.instance[0].key_name : var.key_name
+  root_volume_size = var.root_volume_size
+  app_dir          = local.app_dir
 }
 
 module "remediation" {

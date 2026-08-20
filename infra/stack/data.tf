@@ -36,7 +36,7 @@ data "aws_ami" "ubuntu_2404" {
 
 locals {
   name    = var.project
-  app_dir = "/opt/techstream"
+  app_dir = var.app_dir
 
   # Sorted so a re-plan never proposes moving the instance to another subnet.
   subnet_id = sort(data.aws_subnets.default.ids)[0]

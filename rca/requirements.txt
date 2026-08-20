@@ -1,0 +1,5 @@
+# Only needed for rca/narrate.py, the optional prose layer.
+#
+# rca.py itself is standard library only and has no requirements, so the
+# deterministic analysis always works with no install and no network.
+anthropic>=0.40.0

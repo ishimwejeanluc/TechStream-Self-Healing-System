@@ -1,5 +1,11 @@
 # Secrets and per-environment values
 .env
+
+# Generated SSH private keys. Terraform writes keys/ at 0700 and the key at 0600.
+# The whole directory is ignored, plus the extensions in case one lands elsewhere.
+keys/
+*.pem
+*.key
 *.tfvars
 !*.tfvars.example
 *.auto.tfvars

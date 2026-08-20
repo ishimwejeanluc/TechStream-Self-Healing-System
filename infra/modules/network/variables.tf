@@ -9,7 +9,7 @@ variable "vpc_id" {
 }
 
 variable "allowed_cidr" {
-  description = "CIDR allowed to reach SSH and the web UIs."
+  description = "CIDR allowed to reach SSH and the web UIs. 0.0.0.0/0 exposes unauthenticated Prometheus and Alertmanager to the internet."
   type        = string
 }
 

@@ -12,20 +12,30 @@ variable "project" {
 
 variable "allowed_cidr" {
   description = <<-EOT
-    CIDR allowed to reach SSH and the web UIs. Use your own IP as a /32.
-    Find it with: curl -s https://checkip.amazonaws.com
-    Do not use 0.0.0.0/0. Prometheus and Alertmanager have no authentication.
+    CIDR allowed to reach SSH and the web UIs.
+
+    A single IP as a /32 is the safe setting, found with:
+      curl -s https://checkip.amazonaws.com
+
+    0.0.0.0/0 is permitted because this is a throwaway lab and a changing home
+    IP is a constant nuisance. Understand what it opens before using it:
+
+      9093  Alertmanager, NO authentication. Anyone reaching this port can post
+            an alert and cause the remediation Lambda to restart the instance.
+      9090  Prometheus, NO authentication. Full read of every metric.
+      3000  Grafana. Has a login, so only as strong as the admin password.
+      8080  The app, including its /chaos endpoints.
+      22    SSH.
+
+    Internet-facing unauthenticated services get found by scanners quickly, so
+    run `make down` when you are not using the lab, and destroy the stack when
+    the exercise is over.
   EOT
   type        = string
 
   validation {
     condition     = can(cidrhost(var.allowed_cidr, 0))
-    error_message = "allowed_cidr must be valid CIDR notation, for example 41.186.176.42/32."
-  }
-
-  validation {
-    condition     = var.allowed_cidr != "0.0.0.0/0"
-    error_message = "Refusing 0.0.0.0/0. These ports expose unauthenticated dashboards."
+    error_message = "allowed_cidr must be valid CIDR notation, for example 41.186.176.42/32 or 0.0.0.0/0."
   }
 }
 
@@ -117,4 +127,46 @@ variable "event_bus_name" {
   description = "EventBridge bus for audit events."
   type        = string
   default     = "default"
+}
+
+variable "create_key_pair" {
+  description = <<-EOT
+    Generate an SSH key pair and attach it to the instance, writing the private
+    key to the repo root. Set false to use an existing key via key_name, or to
+    rely solely on SSM Session Manager.
+
+    Note: changing this, or key_name, REPLACES the instance. A key pair cannot be
+    attached to a running EC2 instance after launch.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "private_key_dir" {
+  description = <<-EOT
+    Directory under the repo root for the generated private key. Created by
+    Terraform at 0700 if missing, and gitignored in full.
+  EOT
+  type        = string
+  default     = "keys"
+}
+
+variable "private_key_filename" {
+  description = "Filename for the generated private key. Written into private_key_dir at 0600."
+  type        = string
+  default     = "techstream-key.pem"
+}
+
+variable "app_dir" {
+  description = <<-EOT
+    Directory on the instance holding docker-compose.yml. The SSM restart
+    document runs "cd <app_dir> && docker compose restart app", so this must be
+    exactly where the repo actually lives.
+
+    If you cloned to your home directory instead of /opt/techstream, either set
+    this to that path, or move the repo. A mismatch makes remediation fail with
+    "no configuration file provided" while everything upstream looks healthy.
+  EOT
+  type        = string
+  default     = "/opt/techstream"
 }

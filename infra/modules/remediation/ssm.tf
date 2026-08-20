@@ -18,7 +18,15 @@ resource "aws_ssm_document" "restart_app" {
         inputs = {
           timeoutSeconds = "300"
           runCommand = [
-            "set -euxo pipefail",
+            # "set -eu", NOT "set -euxo pipefail".
+            #
+            # SSM's aws:runShellScript executes the script with /bin/sh, which is
+            # dash on Ubuntu, and dash has no pipefail. The bash form fails on
+            # line 1 with "Illegal option -o pipefail" and exit status 2, before
+            # running anything. There are no pipes here, so pipefail adds nothing.
+            # -x is kept because dash supports it and the trace lands in the SSM
+            # command output, which is where you debug this from.
+            "set -eux",
             # docker-compose.yml is at the repo root, not under monitoring/,
             # because it composes both the app and the monitoring stack.
             "cd ${var.app_dir}",

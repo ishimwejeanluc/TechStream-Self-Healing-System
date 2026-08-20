@@ -11,6 +11,14 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.6"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5"
+    }
   }
 
   # Points at the bucket created by ../bootstrap. Backend blocks cannot use

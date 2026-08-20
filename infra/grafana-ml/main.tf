@@ -5,24 +5,33 @@ data "grafana_data_source" "prometheus" {
 }
 
 locals {
-  # Reused verbatim from monitoring/grafana/dashboards/golden-signals.json and
-  # monitoring/prometheus/rules/alerts.yml, with ONE deliberate difference,
-  # explained below.
+  # Reused from monitoring/grafana/dashboards/golden-signals.json and
+  # monitoring/prometheus/rules/alerts.yml, with two deliberate differences on
+  # the error ratio only. Both were forced by how Prophet trains.
   #
-  # The shared expression returns empty, not zero, when no 5xx series exists.
-  # Measured on a healthy app:
+  # 1. "or vector(0)"
+  #    The shared expression returns empty, not zero, when no 5xx series exists.
+  #    Training on it failed with "No series to train" because there was nothing
+  #    to read. Appending the fallback makes the series continuous.
   #
-  #   without or vector(0)  ->  empty, no series at all
-  #   with    or vector(0)  ->  0
+  # 2. "label_replace(...)"
+  #    vector(0) produces a series with NO labels, which the trainer reported as
+  #    "Ignoring series with only a single value: {}". Giving it a stable label
+  #    set makes it an identifiable series rather than an anonymous one.
   #
-  # For the alert rule, empty is correct and the rule is left alone. For a
-  # forecasting model it is fatal: you cannot train on a series that does not
-  # exist most of the time, and the model would see a handful of disconnected
-  # spikes rather than a continuous baseline of zero.
-  #
-  # This is the only place the project does not reuse the expression byte for
-  # byte, and this comment is the reason why.
-  error_ratio_expr = "(100 * sum(rate(http_requests_total{status=~\"5..\"}[1m])) / clamp_min(sum(rate(http_requests_total[1m])), 1)) or vector(0)"
+  # A third problem is NOT solvable in the query: a perfectly flat line cannot be
+  # forecast. With a healthy app the error ratio is constant 0, and Prophet
+  # rejects it. The baseline therefore has to carry a small realistic error rate,
+  # which is what `make ml-baseline` injects. See docs/grafana-ml-setup.md.
+  error_ratio_expr = "label_replace((100 * sum(rate(http_requests_total{status=~\"5..\"}[1m])) / clamp_min(sum(rate(http_requests_total[1m])), 1)) or vector(0), \"service\", \"techstream-web\", \"\", \"\")"
+
+  # Verbatim from the Total Request Rate panel. Traffic varies naturally, so this
+  # trains without any special handling, and it is the signal most useful for
+  # capacity forecasting.
+  traffic_expr = "sum(rate(http_requests_total[1m]))"
+
+  # Verbatim from the Request Latency panel, p95 series.
+  latency_p95_expr = "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le))"
 
   # Verbatim from the Container CPU panel. No change needed: remote_write only
   # ships techstream-* containers, so name!="" already means "ours".
@@ -47,6 +56,9 @@ resource "grafana_machine_learning_job" "error_ratio" {
   datasource_type = "prometheus"
   datasource_uid  = data.grafana_data_source.prometheus.uid
 
+  interval        = var.training_interval_seconds
+  training_window = var.training_window_seconds
+
   query_params = {
     expr = local.error_ratio_expr
   }
@@ -54,6 +66,57 @@ resource "grafana_machine_learning_job" "error_ratio" {
   custom_labels = {
     project = var.project
     signal  = "errors"
+    source  = "terraform"
+  }
+}
+
+# Forecast on request rate.
+#
+# Added because the error ratio alone is a poor training target: a healthy app
+# holds it at exactly 0, and a flat line cannot be forecast. Traffic varies on its
+# own, so this job trains immediately and gives the ML path something meaningful
+# to show regardless of whether errors are present.
+#
+# It is also the honest capacity-planning use case for forecasting, as opposed to
+# anomaly detection.
+resource "grafana_machine_learning_job" "traffic" {
+  name            = "${var.project} request rate forecast"
+  metric          = "${var.project}_request_rate"
+  datasource_type = "prometheus"
+  datasource_uid  = data.grafana_data_source.prometheus.uid
+
+  interval        = var.training_interval_seconds
+  training_window = var.training_window_seconds
+
+  query_params = {
+    expr = local.traffic_expr
+  }
+
+  custom_labels = {
+    project = var.project
+    signal  = "traffic"
+    source  = "terraform"
+  }
+}
+
+# Forecast on p95 latency. Also varies naturally, and degrades under CPU
+# saturation, so an anomaly here corroborates the saturation story the RCA tells.
+resource "grafana_machine_learning_job" "latency_p95" {
+  name            = "${var.project} p95 latency forecast"
+  metric          = "${var.project}_latency_p95"
+  datasource_type = "prometheus"
+  datasource_uid  = data.grafana_data_source.prometheus.uid
+
+  interval        = var.training_interval_seconds
+  training_window = var.training_window_seconds
+
+  query_params = {
+    expr = local.latency_p95_expr
+  }
+
+  custom_labels = {
+    project = var.project
+    signal  = "latency"
     source  = "terraform"
   }
 }

@@ -168,6 +168,81 @@ services:
     expose:
       - "8000"
 
+  # Continuous low-rate traffic, so the app metrics always exist.
+  #
+  # This exists because of a real problem: prometheus_client only emits a
+  # labelled counter after it has been incremented at least once. With no
+  # traffic, http_requests_total does not exist at all, nothing is shipped to
+  # Grafana Cloud, and the ML jobs have nothing to train on. A burst of traffic
+  # followed by silence produces a series full of gaps.
+  #
+  # It also keeps the error ratio non-flat. Prophet cannot forecast a straight
+  # line, and a perfectly healthy app holds the error ratio at exactly 0.
+  # LOADGEN_ERROR_RATE keeps a small realistic error share in the signal, well
+  # under the 5 percent alert threshold so it never triggers remediation.
+  #
+  # Behind a profile, so it never starts with a plain "docker compose up -d":
+  #   docker compose --profile baseline up -d
+  #   make baseline-up
+  loadgen:
+    image: curlimages/curl:8.10.1
+    container_name: techstream-loadgen
+    profiles:
+      - baseline
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      TARGET: http://app:8080
+      RPS: ${LOADGEN_RPS:-5}
+      ERROR_RATE: ${LOADGEN_ERROR_RATE:-0.015}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        # $$VAR, not $${VAR}: a single $ would be expanded by Compose on the host
+        # instead of by this shell inside the container.
+        echo "loadgen: $$RPS req/s against $$TARGET, baseline error rate $$ERROR_RATE"
+        n=0
+        while true; do
+          # Restore the baseline error rate about once a minute, but ONLY if it is
+          # currently zero.
+          #
+          # Setting it once at startup is not enough: the rate lives in the app's
+          # memory, so any restart silently resets it to 0, including a restart
+          # caused by remediation. The error ratio then goes flat at zero, which
+          # is the untrainable condition this service exists to prevent.
+          #
+          # The "only if zero" check is essential. chaos.sh sets the rate to 0.4,
+          # and a loadgen that blindly re-asserted 0.015 every minute would pull
+          # the ratio back under the 5 percent threshold mid-incident. The alert
+          # would then never fire, or would resolve because the load generator
+          # undid the experiment. Restore, never override.
+          if [ "$$(( n % 60 ))" -eq 0 ]; then
+            cur="$$(curl -s --max-time 5 "$$TARGET/healthz" \
+              | sed -n 's/.*"error_rate":[ ]*\([0-9.]*\).*/\1/p')"
+            case "$$cur" in
+              0|0.0|0.00)
+                curl -s -X POST "$$TARGET/chaos/errors?rate=$$ERROR_RATE" >/dev/null || true
+                echo "loadgen: restored baseline error rate to $$ERROR_RATE"
+                ;;
+              "")
+                # Could not read the app. Do nothing rather than guess, since
+                # guessing wrong means overriding a live experiment.
+                ;;
+            esac
+          fi
+          i=0
+          while [ "$$i" -lt "$$RPS" ]; do
+            curl -s -o /dev/null --max-time 10 "$$TARGET/work" || true
+            i=$$((i + 1))
+          done
+          n=$$((n + 1))
+          sleep 1
+        done
+
 volumes:
   prometheus-data:
   alertmanager-data:

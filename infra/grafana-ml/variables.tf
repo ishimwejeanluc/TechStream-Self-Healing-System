@@ -97,3 +97,25 @@ variable "dbscan_epsilon" {
   type        = number
   default     = 1.0
 }
+
+variable "training_interval_seconds" {
+  description = <<-EOT
+    Bucket size for training data, in seconds. The provider default is 300, which
+    means a 5 minute resolution: an hour of history gives Prophet only 12 points.
+    60 gives five times more points for the same elapsed time, which matters a lot
+    while the lab has hours rather than weeks of data.
+  EOT
+  type        = number
+  default     = 60
+}
+
+variable "training_window_seconds" {
+  description = <<-EOT
+    How far back training looks. The provider default is 7776000, 90 days, which
+    is honest for a long-lived service and misleading for a lab that has been
+    collecting for hours. 7 days is closer to reality here and costs less to query.
+    Raise it once the stack has genuinely been running for weeks.
+  EOT
+  type        = number
+  default     = 604800
+}

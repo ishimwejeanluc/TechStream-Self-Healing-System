@@ -131,6 +131,16 @@ TOKEN=$(grep '^REMEDIATION_WEBHOOK_TOKEN=' .env | cut -d= -f2)
 make configure URL="$(terraform -chdir=infra/stack output -raw lambda_function_url)?token=$TOKEN"
 ```
 
+## Grafana Cloud ML, the insight path
+
+Prometheus also ships these metrics to Grafana Cloud with `remote_write`, where a
+forecast job and a DBSCAN outlier detector run. That path is for detection insight
+and for Sift investigations, and it is **not** wired to remediation. The chain
+above is unchanged by it.
+
+See [grafana-ml-setup.md](grafana-ml-setup.md) for the setup, and
+[GUIDE.md](GUIDE.md) for the end to end walkthrough.
+
 ## Note on the assignment mapping
 
 The original brief reached the Lambda through a CloudWatch Alarm plus an
@@ -194,9 +204,16 @@ same absence. That is why `AppDown` exists as a separate liveness alert, watchin
 # Local stack and volumes
 make down
 
-# AWS, main stack first
+# Grafana Cloud ML jobs. Separate state, so order versus AWS does not matter.
+make ml-destroy
+
+# AWS, main stack
 make tf-destroy
 ```
+
+After `ml-destroy`, delete the `terraform-techstream-ml` service account in
+Grafana to revoke its token, and revoke the `glc_` remote_write token in the
+Cloud Portal.
 
 `infra/bootstrap` is destroyed **last**, because it holds the S3 bucket
 containing the main stack's state. Destroying it first would strand that state.

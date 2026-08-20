@@ -29,7 +29,8 @@ are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 ├── infra/                    all Terraform
 │   ├── bootstrap/            local state, creates the S3 backend
 │   ├── stack/                remote state, composes the modules
-│   └── modules/              network, compute, remediation
+│   ├── modules/              network, compute, remediation
+│   └── grafana-ml/           Grafana Cloud ML jobs, separate state
 └── docs/                     one document per build step, plus the runbook
 ```
 
@@ -54,8 +55,12 @@ RCA gets a clean baseline.
 
 ## Deploying to AWS
 
-Terraform is written, validated and planned. **It has not been applied.**
-`bootstrap` plans 7 resources, `stack` plans 17.
+Terraform is applied. `bootstrap` created 7 resources (the S3 state backend) and
+`stack` created 17 (EC2, security group, IAM, SSM document, Lambda, Function URL,
+log group). `infra/grafana-ml` created the ML jobs.
+
+The instance is a running `t3.medium`, roughly $0.05 per hour. Run
+`make tf-destroy` when finished, or it bills until you do.
 
 ### One time: the state backend
 
@@ -155,6 +160,40 @@ the line you watch and the line that restarts the app cannot disagree:
 Routing is fail closed: the default receiver is the null receiver, so a new alert
 cannot inherit remediation by accident. Verify with `make routes`.
 
+## Grafana Cloud Machine Learning
+
+The AI/ML root cause artifact. Chosen over Amazon DevOps Guru because DevOps Guru
+reads CloudWatch, and this lab's application errors live in Prometheus. For the
+incident this lab remediates, host CPU peaked at 15.8 percent while 771 requests
+failed, so DevOps Guru would have reported nothing.
+
+Prometheus ships a copy of its metrics with `remote_write`. Local scraping and
+local alerting are unaffected: if Grafana Cloud is unreachable, the self-healing
+loop keeps working.
+
+An allowlist ships **121 series out of about 3600**, because the rest is
+node-exporter, Prometheus and Alertmanager internals that no panel, rule or ML job
+queries. It also filters cAdvisor down to this project's containers, since cAdvisor
+reports every container on the host.
+
+```bash
+make cloud-token TOKEN=glc_...   # Cloud Portal token, scope metrics:write
+make cloud-status                # 0 failures, Active Series climbing
+make ml-apply                    # forecast job, DBSCAN detector, insight alerts
+make ml-baseline                 # 10 min healthy traffic BEFORE any chaos
+```
+
+Two separate tokens are involved and they are not interchangeable: a `glc_` Cloud
+Portal token for `remote_write`, and a `glsa_` Grafana service account token for
+Terraform. Full detail in [docs/grafana-ml-setup.md](docs/grafana-ml-setup.md).
+
+The ML alerts carry `remediation = "none"` and are routed nowhere. The Prometheus
+`HighErrorRate` rule remains the only thing that triggers a restart, so a
+mistrained model cannot restart the app.
+
+**Models need a training window.** If chaos runs while a model is still learning,
+it learns that a 40 percent error rate is normal and will never flag it.
+
 ## Secrets
 
 Nothing secret is committed.
@@ -176,8 +215,13 @@ the same provider build (aws 6.60.0).
 
 ## Security notes
 
-- `allowed_cidr` rejects `0.0.0.0/0` by variable validation. Prometheus and
-  Alertmanager have no authentication.
+- `allowed_cidr` controls who reaches ports 22, 3000, 8080, 9090 and 9093.
+  Prometheus (9090) and Alertmanager (9093) have **no authentication at all**,
+  and anyone reaching 9093 can post an alert that triggers a restart. A `/32` of
+  your own IP is the safe setting. `0.0.0.0/0` is permitted for lab convenience,
+  since a changing home IP otherwise locks you out, but it exposes both of those
+  services to the internet. The earlier validation rule that refused
+  `0.0.0.0/0` was removed deliberately to allow this.
 - The Lambda Function URL is `authorization_type = "NONE"`, because Alertmanager
   cannot sign SigV4. The `?token=` shared secret is the **only** gate on
   remediation. Treat it like a password.
@@ -205,6 +249,7 @@ results.
 
 | Document | Contents |
 |---|---|
+| **[GUIDE](docs/GUIDE.md)** | **Start here. Zero to finished, in order, with the traps** |
 | [step-00](docs/step-00-remote-state-backend.md) | Remote state backend, the chicken and egg problem |
 | [step-01](docs/step-01-terraform-infrastructure.md) | Terraform modules, least privilege IAM |
 | [step-02](docs/step-02-web-app.md) | The app, metrics contract, why requests burn CPU |
@@ -222,8 +267,12 @@ chain the RCA needed, and a contaminated baseline that made a report look broken
 
 ```bash
 make down          # local stack and volumes
-make tf-destroy    # AWS main stack
+make ml-destroy    # Grafana Cloud ML jobs, independent of AWS
+make tf-destroy    # AWS main stack: EC2, Lambda, SG, IAM
 ```
+
+Then delete the `terraform-techstream-ml` service account in Grafana, which
+revokes its token, and revoke the `glc_` token in the Cloud Portal.
 
 `infra/bootstrap` is destroyed **last**, because it holds the bucket containing
 the main stack's state. The bucket also carries `prevent_destroy = true`, so

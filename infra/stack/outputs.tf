@@ -57,3 +57,18 @@ output "configure_command" {
   description = "Run this on the instance to point Alertmanager at the Lambda."
   value       = "make configure URL='${module.remediation.lambda_function_url}'"
 }
+
+output "key_pair_name" {
+  description = "Name of the EC2 key pair attached to the instance, null if none."
+  value       = var.create_key_pair ? aws_key_pair.instance[0].key_name : var.key_name
+}
+
+output "private_key_path" {
+  description = "Where the generated private key was written. Mode 0600, gitignored."
+  value       = var.create_key_pair ? abspath("${path.module}/../../${var.private_key_dir}/${var.private_key_filename}") : null
+}
+
+output "ssh_command" {
+  description = "Ready-made SSH command."
+  value       = var.create_key_pair ? "ssh -i ${var.private_key_dir}/${var.private_key_filename} ubuntu@${module.compute.public_ip}" : "no key pair, use: aws ssm start-session --target ${module.compute.instance_id}"
+}

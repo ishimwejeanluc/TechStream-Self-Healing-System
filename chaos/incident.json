@@ -1,6 +1,6 @@
 {
   "mode": "errors",
-  "target": "http://localhost:8080",
+  "target": "http://54.154.176.80:8080",
   "note": "Lab-generated load from chaos.sh. These are simulated requests, not real user traffic.",
   "parameters": {
     "error_rate": 0.4,
@@ -10,28 +10,28 @@
     "recovery_seconds": 240,
     "reset_on_exit": false
   },
-  "started_at": "2026-08-17T13:30:12Z",
-  "started_epoch": 1786973412,
-  "injection_ended_at": "2026-08-17T13:32:12Z",
-  "injection_ended_epoch": 1786973532,
-  "ended_at": "2026-08-17T13:36:12Z",
-  "ended_epoch": 1786973772,
-  "duration_seconds": 360,
+  "started_at": "2026-08-20T16:01:44Z",
+  "started_epoch": 1787241704,
+  "injection_ended_at": "2026-08-20T16:03:45Z",
+  "injection_ended_epoch": 1787241825,
+  "ended_at": "2026-08-20T16:07:45Z",
+  "ended_epoch": 1787242065,
+  "duration_seconds": 361,
   "windows": {
-    "baseline": { "start_epoch": 1786973112, "end_epoch": 1786973412 },
-    "injection": { "start_epoch": 1786973412, "end_epoch": 1786973532 },
-    "recovery": { "start_epoch": 1786973532, "end_epoch": 1786973772 },
-    "query": { "start_epoch": 1786973112, "end_epoch": 1786973832 }
+    "baseline": { "start_epoch": 1787241404, "end_epoch": 1787241704 },
+    "injection": { "start_epoch": 1787241704, "end_epoch": 1787241825 },
+    "recovery": { "start_epoch": 1787241825, "end_epoch": 1787242065 },
+    "query": { "start_epoch": 1787241404, "end_epoch": 1787242125 }
   },
   "requests": {
-    "sent": 6960,
-    "http_2xx": 6089,
-    "http_5xx": 771,
-    "observed_rps": 19
+    "sent": 6100,
+    "http_2xx": 3660,
+    "http_5xx": 2440,
+    "observed_rps": 16
   },
-  "app_start_time_seconds_first": 1.786972672807714e+09,
-  "app_start_time_seconds_last": 1.78697351422624e+09,
-  "distinct_app_processes_seen": 2,
-  "app_restart_count": 1,
-  "app_restarted_during_run": true
+  "app_start_time_seconds_first": 1.7872400455467687e+09,
+  "app_start_time_seconds_last": 1.7872400455467687e+09,
+  "distinct_app_processes_seen": 1,
+  "app_restart_count": 0,
+  "app_restarted_during_run": false
 }

@@ -21,6 +21,11 @@ RPS ?= 20
 RATE ?= 0.4
 CPUS ?= 4
 
+# Baseline for ML training. A flat zero error ratio cannot be forecast, so the
+# baseline carries a small realistic error rate, below the 5 percent threshold.
+BASELINE_ERROR_RATE ?= 0.015
+BASELINE_DURATION ?= 900
+
 .PHONY: help
 help: ## Show this help
 	@echo "TechStream self-healing lab"
@@ -194,6 +199,18 @@ rca: ## Correlate the last incident and write rca/rca_report.{json,md}
 	@echo
 	@echo "read it with: less rca/rca_report.md"
 
+.PHONY: narrate
+narrate: ## Write the prose incident narrative and recommendations from the RCA plus ML signals
+	@python3 -c "import anthropic" 2>/dev/null || { \
+		echo "error: the anthropic SDK is not installed." >&2; \
+		echo "       pip install anthropic" >&2; exit 1; }
+	@test -n "$$ANTHROPIC_API_KEY" || command -v ant >/dev/null 2>&1 || { \
+		echo "error: no credentials. Set ANTHROPIC_API_KEY, or install the ant CLI" >&2; \
+		echo "       and run: ant auth login" >&2; exit 1; }
+	python3 rca/narrate.py
+	@echo
+	@echo "read it with: less rca/rca_narrative.md"
+
 .PHONY: loop
 loop: ## Full demo: inject errors, let remediation fix it, then produce the RCA
 	@echo "Leaving a 5 minute idle gap first, so the RCA gets a clean baseline."
@@ -253,12 +270,63 @@ ml-destroy: ## Destroy ONLY the ML jobs. Independent of the AWS stack.
 	@echo "terraform-techstream-ml service account in Grafana to revoke its token."
 
 .PHONY: ml-baseline
-ml-baseline: ## Run the baseline traffic the models must train on BEFORE any chaos
-	@echo "Models learn normal from this. If chaos runs during the training"
-	@echo "window, the model learns that failing is normal and will not flag it."
-	@$(MAKE) --no-print-directory traffic DURATION=600 RPS=20
+ml-baseline: ## Baseline traffic the models train on. Includes a small realistic error rate.
+	@echo "Models learn normal from this. Two things matter:"
+	@echo "  1. Do NOT run chaos during this window, or the model learns that"
+	@echo "     failing is normal and will never flag it."
+	@echo "  2. A perfectly healthy app holds the error ratio at exactly 0, and"
+	@echo "     Prophet cannot forecast a flat line. It fails with"
+	@echo "     'Ignoring series with only a single value'. So the baseline"
+	@echo "     carries $(BASELINE_ERROR_RATE) errors, well under the 5 percent alert"
+	@echo "     threshold, which is what a real service looks like anyway."
 	@echo
-	@echo "Now check the jobs are trained and healthy before injecting a fault."
+	@curl -s -X POST '$(APP_URL)/chaos/errors?rate=$(BASELINE_ERROR_RATE)' >/dev/null \
+		&& echo "baseline error rate set to $(BASELINE_ERROR_RATE)" \
+		|| { echo "error: app not reachable at $(APP_URL)" >&2; exit 1; }
+	@$(MAKE) --no-print-directory traffic DURATION=$(BASELINE_DURATION) RPS=$(RPS)
+	@echo
+	@echo "Baseline done. The error rate is left in place on purpose so the signal"
+	@echo "keeps varying. A container restart clears it, so re-run this after one."
+	@echo "Now check the jobs report trained, then inject a fault."
+
+.PHONY: baseline-up
+baseline-up: ## Start continuous low-rate traffic so metrics always exist and models keep training
+	docker compose --profile baseline up -d loadgen
+	@echo
+	@echo "loadgen is running. Leave it up. It keeps http_requests_total alive and"
+	@echo "keeps a small error share in the signal so the forecast is trainable."
+	@echo "Stop it with: make baseline-down"
+
+.PHONY: baseline-down
+baseline-down: ## Stop the continuous traffic generator
+	docker compose --profile baseline stop loadgen
+	docker compose --profile baseline rm -f loadgen
+
+.PHONY: ml-retrain
+ml-retrain: ## Force retraining now. Jobs otherwise retrain only once a day.
+	@echo "The provider does not expose training_frequency, so the only way to"
+	@echo "retrain on demand is to recreate the job. This replaces all three."
+	terraform -chdir=infra/grafana-ml apply -auto-approve \
+		-replace=grafana_machine_learning_job.error_ratio \
+		-replace=grafana_machine_learning_job.traffic \
+		-replace=grafana_machine_learning_job.latency_p95
+	@echo
+	@echo "Training takes a couple of minutes. Check with: make ml-status"
+
+.PHONY: ml-status
+ml-status: ## Show real training outcome per ML job. Reads trainingResult, not status.
+	@GT=$$(grep '^grafana_auth' infra/grafana-ml/terraform.tfvars | sed 's/.*= *"//; s/"//'); \
+	GU=$$(grep '^grafana_url' infra/grafana-ml/terraform.tfvars | sed 's/.*= *"//; s/"//'); \
+	curl -s -H "Authorization: Bearer $$GT" \
+		"$$GU/api/plugins/grafana-ml-app/resources/manage/api/v1/jobs" \
+	| python3 -c 'import json,sys; \
+jobs=json.load(sys.stdin)["data"]; \
+rows=[(j["name"][:34], (j.get("lastTrainingStatus") or {}).get("status","?"), j.get("trainingResult") or "") for j in jobs]; \
+[print(f"  {n:36} {s:9} {r[:58]}") for n,s,r in rows]; \
+print(); \
+print(f"  {sum(1 for _,s,_ in rows if s == chr(115)+chr(117)+chr(99)+chr(99)+chr(101)+chr(115)+chr(115))}/{len(rows)} genuinely trained"); \
+print("  NOTE: a job can show status=ready while lastTrainingStatus=warnings,"); \
+print("        which means it trained nothing. Trust this column, not the UI badge.")'
 
 .PHONY: tf-destroy
 tf-destroy: ## Destroy the main stack. Bootstrap is destroyed separately and last.
