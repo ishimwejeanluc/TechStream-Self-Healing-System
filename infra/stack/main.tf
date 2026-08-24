@@ -32,7 +32,7 @@ module "remediation" {
 
   instance_id  = module.compute.instance_id
   instance_arn = module.compute.instance_arn
-  app_dir      = local.app_dir
+  restart_dir  = var.restart_dir
 
   webhook_token      = var.remediation_webhook_token
   expected_alertname = "HighErrorRate"

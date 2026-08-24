@@ -23,10 +23,18 @@ variable "instance_arn" {
   type        = string
 }
 
-variable "app_dir" {
-  description = "Repo root on the instance. The restart document cds here, where docker-compose.yml lives."
+variable "restart_dir" {
+  description = <<-EOT
+    Directory the SSM restart document cds into. Must be where
+    docker-compose.yml actually lives on the instance.
+
+    Deliberately NOT the same variable that user_data uses. user_data is baked
+    at launch and changing it replaces the instance, so coupling the two meant
+    that correcting the restart path destroyed the box. This one only feeds the
+    SSM document, which updates in place.
+  EOT
   type        = string
-  default     = "/opt/techstream"
+  default     = "/home/ubuntu/TechStream-Self-Healing-System"
 }
 
 variable "compose_service" {

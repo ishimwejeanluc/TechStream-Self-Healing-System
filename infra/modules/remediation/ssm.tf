@@ -29,7 +29,7 @@ resource "aws_ssm_document" "restart_app" {
             "set -eux",
             # docker-compose.yml is at the repo root, not under monitoring/,
             # because it composes both the app and the monitoring stack.
-            "cd ${var.app_dir}",
+            "cd ${var.restart_dir}",
             "docker compose restart ${var.compose_service}",
             "docker compose ps ${var.compose_service}",
           ]

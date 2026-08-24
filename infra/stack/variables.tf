@@ -159,14 +159,29 @@ variable "private_key_filename" {
 
 variable "app_dir" {
   description = <<-EOT
-    Directory on the instance holding docker-compose.yml. The SSM restart
-    document runs "cd <app_dir> && docker compose restart app", so this must be
-    exactly where the repo actually lives.
+    Directory user_data creates and chowns at launch. Baked into user_data, so
+    CHANGING THIS REPLACES THE INSTANCE. Leave it alone unless you mean that.
 
-    If you cloned to your home directory instead of /opt/techstream, either set
-    this to that path, or move the repo. A mismatch makes remediation fail with
-    "no configuration file provided" while everything upstream looks healthy.
+    This is not where remediation looks. That is restart_dir below.
   EOT
   type        = string
   default     = "/opt/techstream"
+}
+
+variable "restart_dir" {
+  description = <<-EOT
+    Where docker-compose.yml actually lives on the instance. The SSM restart
+    document runs "cd <restart_dir> && docker compose restart app".
+
+    Defaults to the home directory path, because that is where a plain
+    "git clone" puts the repo. Changing this updates the SSM document in place
+    and does NOT touch the instance.
+
+    If it does not match reality, remediation fails with "no configuration file
+    provided" while the alert, the Lambda and SSM all report success. That is the
+    hardest failure in this stack to spot, so it is worth checking:
+      aws ssm list-command-invocations --command-id <id> --details
+  EOT
+  type        = string
+  default     = "/home/ubuntu/TechStream-Self-Healing-System"
 }
